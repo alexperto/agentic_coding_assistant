@@ -31,11 +31,14 @@ Provide only the direct answer to what was asked.
 """
     
     def __init__(self, endpoint: str, api_key: str, api_version: str, deployment: str):
+        # Construct AzureOpenAI client with explicit Azure parameters.
+        # Use `azure_endpoint` and `api_key` (or `azure_ad_token` if you have an AAD token).
         self.client = AzureOpenAI(
-            azure_endpoint=endpoint,
-            api_key=api_key,
+            base_url=endpoint,
+            azure_ad_token=api_key,
             api_version=api_version
         )
+
         self.deployment = deployment
         
         # Pre-build base API parameters
@@ -83,10 +86,21 @@ Provide only the direct answer to what was asked.
         
         # Add tools if available (convert to OpenAI function calling format)
         if tools:
-            api_params["tools"] = self._convert_tools_to_openai_format(tools)
+            print(">>> TOOLS:", tools)
+            api_params["tools"] = tools
             api_params["tool_choice"] = "auto"
         
         # Get response from Azure OpenAI
+        #print("-----------------------------------------------------------------")
+        
+        #print(">>> API PARAMS:", api_params)
+        #print(">>> Client object:", self.client)
+        #print(">>> Client attributes:", dir(self.client))
+        #try:
+        #    print(">>> Client vars:", vars(self.client))
+        #except:
+        #    print(">>> Could not get client vars (might be a proxied object)")
+        #print("-----------------------------------------------------------------")
         response = self.client.chat.completions.create(**api_params)
         
         # Handle tool execution if needed
@@ -95,24 +109,7 @@ Provide only the direct answer to what was asked.
         
         # Return direct response
         return response.choices[0].message.content
-    
-    def _convert_tools_to_openai_format(self, anthropic_tools: List[Dict]) -> List[Dict]:
-        """Convert Anthropic tool definitions to OpenAI function calling format"""
-        openai_tools = []
         
-        for tool in anthropic_tools:
-            openai_tool = {
-                "type": "function",
-                "function": {
-                    "name": tool["name"],
-                    "description": tool["description"],
-                    "parameters": tool["inputSchema"]
-                }
-            }
-            openai_tools.append(openai_tool)
-        
-        return openai_tools
-    
     def _handle_tool_execution(self, initial_response, messages: List[Dict], tool_manager):
         """
         Handle execution of tool calls and get follow-up response.

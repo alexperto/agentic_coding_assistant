@@ -126,6 +126,78 @@ class CourseSearchTool(Tool):
 
         return "\n\n".join(formatted)
 
+
+class CourseOutlineTool(Tool):
+    """Tool for retrieving course outlines and structure"""
+
+    def __init__(self, vector_store: VectorStore):
+        self.store = vector_store
+
+    def get_tool_definition(self) -> Dict[str, Any]:
+        """Return OpenAI function definition for this tool"""
+        return {
+            "type": "function",
+            "function": {
+                "name": "get_course_outline",
+                "description": "Get the complete outline and structure of a course, including all lessons",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "course_title": {
+                            "type": "string",
+                            "description": "The course title or name (partial matches work, e.g. 'MCP', 'Introduction')"
+                        }
+                    },
+                    "required": ["course_title"]
+                }
+            }
+        }
+
+    def execute(self, course_title: str) -> str:
+        """
+        Execute the course outline retrieval.
+
+        Args:
+            course_title: Course name or title to get outline for
+
+        Returns:
+            Formatted course outline or error message
+        """
+        # Get course outline from vector store
+        outline = self.store.get_course_outline(course_title)
+
+        # Handle not found
+        if not outline:
+            return f"No course found matching '{course_title}'."
+
+        # Format the outline
+        return self._format_outline(outline)
+
+    def _format_outline(self, outline: Dict[str, Any]) -> str:
+        """Format course outline for display"""
+        parts = []
+
+        # Course title and link
+        parts.append(f"Course: {outline['course_title']}")
+        if outline.get('course_link'):
+            parts.append(f"Link: {outline['course_link']}")
+
+        # Instructor if available
+        if outline.get('instructor'):
+            parts.append(f"Instructor: {outline['instructor']}")
+
+        # Lessons
+        lessons = outline.get('lessons', [])
+        if lessons:
+            parts.append(f"\nLessons ({len(lessons)} total):")
+            for lesson in lessons:
+                lesson_num = lesson.get('lesson_number')
+                lesson_title = lesson.get('lesson_title')
+                parts.append(f"  Lesson {lesson_num}: {lesson_title}")
+
+        return "\n".join(parts)
+
+
 class ToolManager:
     """Manages available tools for the AI"""
     

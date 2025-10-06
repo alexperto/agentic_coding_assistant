@@ -122,7 +122,6 @@ function addMessage(content, type, sources = null, isWelcome = false) {
     let html = `<div class="message-content">${displayContent}</div>`;
 
     if (sources && sources.length > 0) {
-        console.log('Sources received:', JSON.stringify(sources, null, 2));
         // Format sources with links if available
         const formattedSources = sources.map(source => {
             if (typeof source === 'object' && source !== null && 'text' in source) {

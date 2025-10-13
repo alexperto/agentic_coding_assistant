@@ -59,18 +59,13 @@ class TestAIGeneratorWithoutTools:
     """Test AIGenerator when tools are not used"""
 
     @patch('ai_generator.AzureOpenAI')
-    def test_generate_response_without_tools(self, mock_azure_client_class):
+    def test_generate_response_without_tools(self, mock_azure_client_class, ai_generator_factory):
         """Test generating a simple response without tools"""
         mock_client = Mock()
         mock_client.chat.completions.create.return_value = create_mock_response("This is a test response.")
         mock_azure_client_class.return_value = mock_client
 
-        generator = AIGenerator(
-            endpoint="https://test.openai.azure.com",
-            api_key="test-key",
-            api_version="2024-02-01",
-            deployment="gpt-4"
-        )
+        generator = ai_generator_factory()
 
         response = generator.generate_response(query="What is 2+2?")
 
@@ -78,18 +73,13 @@ class TestAIGeneratorWithoutTools:
         mock_client.chat.completions.create.assert_called_once()
 
     @patch('ai_generator.AzureOpenAI')
-    def test_generate_response_with_conversation_history(self, mock_azure_client_class):
+    def test_generate_response_with_conversation_history(self, mock_azure_client_class, ai_generator_factory):
         """Test generating response with conversation history"""
         mock_client = Mock()
         mock_client.chat.completions.create.return_value = create_mock_response("Continuing the conversation.")
         mock_azure_client_class.return_value = mock_client
 
-        generator = AIGenerator(
-            endpoint="https://test.openai.azure.com",
-            api_key="test-key",
-            api_version="2024-02-01",
-            deployment="gpt-4"
-        )
+        generator = ai_generator_factory()
 
         history = "User: Hello\nAssistant: Hi there!"
         response = generator.generate_response(query="How are you?", conversation_history=history)
@@ -104,7 +94,7 @@ class TestAIGeneratorWithTools:
     """Test AIGenerator with tool calling"""
 
     @patch('ai_generator.AzureOpenAI')
-    def test_tools_parameter_passed_to_api(self, mock_azure_client_class, mock_vector_store):
+    def test_tools_parameter_passed_to_api(self, mock_azure_client_class, mock_vector_store, ai_generator_factory):
         """Test that tools are correctly passed to the API"""
         mock_client = Mock()
         mock_client.chat.completions.create.return_value = create_mock_response("Here's the answer.")
@@ -113,12 +103,7 @@ class TestAIGeneratorWithTools:
         tool_manager = ToolManager()
         tool_manager.register_tool(CourseSearchTool(mock_vector_store))
 
-        generator = AIGenerator(
-            endpoint="https://test.openai.azure.com",
-            api_key="test-key",
-            api_version="2024-02-01",
-            deployment="gpt-4"
-        )
+        generator = ai_generator_factory()
 
         generator.generate_response(
             query="What is Anthropic?",
@@ -132,7 +117,7 @@ class TestAIGeneratorWithTools:
         assert len(call_kwargs["tools"]) > 0
 
     @patch('ai_generator.AzureOpenAI')
-    def test_ai_calls_search_tool(self, mock_azure_client_class, mock_vector_store_with_results):
+    def test_ai_calls_search_tool(self, mock_azure_client_class, mock_vector_store_with_results, ai_generator_factory):
         """Test that AI correctly calls the search tool"""
         mock_client = Mock()
 
@@ -153,12 +138,7 @@ class TestAIGeneratorWithTools:
         tool_manager = ToolManager()
         tool_manager.register_tool(CourseSearchTool(mock_vector_store_with_results))
 
-        generator = AIGenerator(
-            endpoint="https://test.openai.azure.com",
-            api_key="test-key",
-            api_version="2024-02-01",
-            deployment="gpt-4"
-        )
+        generator = ai_generator_factory()
 
         response = generator.generate_response(
             query="What is Anthropic?",
@@ -175,7 +155,7 @@ class TestAIGeneratorWithTools:
         assert mock_client.chat.completions.create.call_count == 2
 
     @patch('ai_generator.AzureOpenAI')
-    def test_tool_result_formatting(self, mock_azure_client_class, mock_vector_store_with_results):
+    def test_tool_result_formatting(self, mock_azure_client_class, mock_vector_store_with_results, ai_generator_factory):
         """Test that tool results are correctly formatted in messages"""
         mock_client = Mock()
 
@@ -189,12 +169,7 @@ class TestAIGeneratorWithTools:
         tool_manager = ToolManager()
         tool_manager.register_tool(CourseSearchTool(mock_vector_store_with_results))
 
-        generator = AIGenerator(
-            endpoint="https://test.openai.azure.com",
-            api_key="test-key",
-            api_version="2024-02-01",
-            deployment="gpt-4"
-        )
+        generator = ai_generator_factory()
 
         generator.generate_response(query="test", tools=tool_manager.get_tool_definitions(), tool_manager=tool_manager)
 
@@ -211,7 +186,7 @@ class TestAIGeneratorToolCallingBug:
     """Tests specifically for the MAX_RESULTS=0 bug affecting tool calling"""
 
     @patch('ai_generator.AzureOpenAI')
-    def test_ai_tool_call_with_zero_results(self, mock_azure_client_class, empty_search_results):
+    def test_ai_tool_call_with_zero_results(self, mock_azure_client_class, empty_search_results, ai_generator_factory):
         """Test what happens when tool returns empty results due to MAX_RESULTS=0"""
         mock_client = Mock()
 
@@ -228,12 +203,7 @@ class TestAIGeneratorToolCallingBug:
         tool_manager = ToolManager()
         tool_manager.register_tool(CourseSearchTool(mock_vector_store))
 
-        generator = AIGenerator(
-            endpoint="https://test.openai.azure.com",
-            api_key="test-key",
-            api_version="2024-02-01",
-            deployment="gpt-4"
-        )
+        generator = ai_generator_factory()
 
         response = generator.generate_response(
             query="What is Anthropic?",
@@ -245,7 +215,7 @@ class TestAIGeneratorToolCallingBug:
         mock_vector_store.search.assert_called_once()
 
     @patch('ai_generator.AzureOpenAI')
-    def test_multiple_tool_calls(self, mock_azure_client_class, mock_vector_store_with_results):
+    def test_multiple_tool_calls(self, mock_azure_client_class, mock_vector_store_with_results, ai_generator_factory):
         """Test AI making multiple tool calls in sequence"""
         mock_client = Mock()
 
@@ -259,12 +229,7 @@ class TestAIGeneratorToolCallingBug:
         tool_manager = ToolManager()
         tool_manager.register_tool(CourseSearchTool(mock_vector_store_with_results))
 
-        generator = AIGenerator(
-            endpoint="https://test.openai.azure.com",
-            api_key="test-key",
-            api_version="2024-02-01",
-            deployment="gpt-4"
-        )
+        generator = ai_generator_factory()
 
         response = generator.generate_response(
             query="test",

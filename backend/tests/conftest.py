@@ -157,6 +157,20 @@ def mock_ai_client_with_tool_call():
     return mock_client
 
 
+@pytest.fixture
+def ai_generator_factory():
+    """Factory to create AIGenerator instances with standard test parameters"""
+    def _create():
+        from ai_generator import AIGenerator
+        return AIGenerator(
+            endpoint="https://test.openai.azure.com",
+            api_key="test-key",
+            api_version="2024-02-01",
+            deployment="gpt-4"
+        )
+    return _create
+
+
 # ============================================================================
 # Configuration Fixtures
 # ============================================================================

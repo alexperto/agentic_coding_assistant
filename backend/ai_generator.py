@@ -6,36 +6,41 @@ class AIGenerator:
     """Handles interactions with Azure OpenAI API for generating responses"""
     
     # Static system prompt to avoid rebuilding on each call
-    SYSTEM_PROMPT = """ You are an AI assistant specialized in course materials and educational content with access to comprehensive tools for course information.
+    SYSTEM_PROMPT = """You are an AI assistant specialized in course materials and educational content with access to comprehensive tools for course information.
 
 Available Tools:
 1. **get_course_outline**: Retrieves course structure, outline, and lesson list
-   - Use for: "What is the outline?", "List the lessons", "What's in this course?", "Course structure"
+   - Use for: "What is the outline?", "List the lessons", "What's in this course?"
    - Returns: Course title, link, instructor, and complete lesson list with numbers and titles
 
 2. **search_course_content**: Searches within specific course materials and content
-   - Use for: Questions about specific topics, concepts, or detailed content within courses
+   - Use for: Questions about specific topics, concepts, or detailed content
    - Supports filtering by course name and lesson number
 
 Tool Usage Guidelines:
-- **One tool call per query maximum**
-- Choose the appropriate tool based on the question type
-- Synthesize tool results into accurate, fact-based responses
-- If tool yields no results, state this clearly without offering alternatives
+- **Sequential tool calling**: You can make MULTIPLE tool calls across up to 2 rounds
+- **Round 1**: Make initial tool call(s) to gather necessary information
+- **Round 2**: If needed, use Round 1 results to make more specific follow-up tool calls
+- **When to use sequential calls**:
+  - User asks about "same topic as lesson X of course Y" → Get lesson X title, then search for that topic
+  - User asks to compare content → Get outline first, then search specific sections
+- **When to stop**: You have sufficient info, tool returns error, or you've made 2 rounds of calls
+- Choose the appropriate tool(s) based on the question type and previous results
 
 Response Protocol:
-- **General knowledge questions**: Answer using existing knowledge without using tools
-- **Course outline/structure questions**: Use get_course_outline
-- **Course content questions**: Use search_course_content
+- **General knowledge**: Answer without tools
+- **Course structure**: Use get_course_outline
+- **Course content**: Use search_course_content
+- **Cross-reference queries**: Use get_course_outline THEN search_course_content
 - **No meta-commentary**:
- - Provide direct answers only — no reasoning process, tool explanations, or question-type analysis
- - Do not mention "based on the search results" or "using the tool"
+  - Provide direct answers only — no reasoning process, tool explanations, or question-type analysis
+  - Do not mention "based on the search results" or "using the tool"
 
 All responses must be:
-1. **Brief, Concise and focused** - Get to the point quickly
+1. **Brief and focused** - Get to the point quickly
 2. **Educational** - Maintain instructional value
 3. **Clear** - Use accessible language
-4. **Example-supported** - Include relevant examples when they aid understanding
+4. **Example-supported** - Include relevant examples when helpful
 Provide only the direct answer to what was asked.
 """
     
@@ -57,111 +62,125 @@ Provide only the direct answer to what was asked.
             "max_tokens": 800
         }
     
-    def generate_response(self, query: str,
+    def generate_response(self,
+                         query: str,
                          conversation_history: Optional[str] = None,
                          tools: Optional[List] = None,
-                         tool_manager=None) -> str:
+                         tool_manager=None,
+                         max_tool_rounds: int = 2) -> str:
         """
-        Generate AI response with optional tool usage and conversation context.
-        
+        Generate AI response with support for sequential tool calling.
+
         Args:
-            query: The user's question or request
+            query: The user's question
             conversation_history: Previous messages for context
-            tools: Available tools the AI can use
+            tools: Available tools (OpenAI function definitions)
             tool_manager: Manager to execute tools
-            
+            max_tool_rounds: Maximum tool calling rounds (default: 2)
+
         Returns:
-            Generated response as string
+            Final generated response string
         """
-        
-        # Build messages array with system prompt
+        # Build initial messages
         messages = [{"role": "system", "content": self.SYSTEM_PROMPT}]
-        
-        # Add conversation history if available
+
         if conversation_history:
             messages.append({
-                "role": "system", 
+                "role": "system",
                 "content": f"Previous conversation:\n{conversation_history}"
             })
-        
-        # Add user query
+
         messages.append({"role": "user", "content": query})
-        
-        # Prepare API call parameters
-        api_params = {
-            **self.base_params,
-            "messages": messages
-        }
-        
-        # Add tools if available (convert to OpenAI function calling format)
-        if tools:
-            print(">>> TOOLS:", tools)
-            api_params["tools"] = tools
-            api_params["tool_choice"] = "auto"
-        
-        # Get response from Azure OpenAI
-        #print("-----------------------------------------------------------------")
-        
-        #print(">>> API PARAMS:", api_params)
-        #print(">>> Client object:", self.client)
-        #print(">>> Client attributes:", dir(self.client))
-        #try:
-        #    print(">>> Client vars:", vars(self.client))
-        #except:
-        #    print(">>> Could not get client vars (might be a proxied object)")
-        #print("-----------------------------------------------------------------")
-        response = self.client.chat.completions.create(**api_params)
-        
-        # Handle tool execution if needed
-        if response.choices[0].message.tool_calls and tool_manager:
-            return self._handle_tool_execution(response, messages, tool_manager)
-        
-        # Return direct response
-        return response.choices[0].message.content
-        
-    def _handle_tool_execution(self, initial_response, messages: List[Dict], tool_manager):
-        """
-        Handle execution of tool calls and get follow-up response.
-        
-        Args:
-            initial_response: The response containing tool use requests
-            messages: Current conversation messages
-            tool_manager: Manager to execute tools
-            
-        Returns:
-            Final response text after tool execution
-        """
-        # Add AI's tool use response to messages
-        messages.append({
-            "role": "assistant",
-            "content": initial_response.choices[0].message.content,
-            "tool_calls": initial_response.choices[0].message.tool_calls
-        })
-        
-        # Execute all tool calls and collect results
-        for tool_call in initial_response.choices[0].message.tool_calls:
-            # Parse function arguments
-            function_args = json.loads(tool_call.function.arguments)
-            
-            # Execute the tool
-            tool_result = tool_manager.execute_tool(
-                tool_call.function.name,
-                **function_args
-            )
-            
-            # Add tool result as message
+
+        # Iterative tool calling loop
+        current_round = 0
+
+        while current_round < max_tool_rounds:
+            current_round += 1
+
+            # Prepare API parameters with accumulated messages
+            api_params = {
+                **self.base_params,
+                "messages": messages
+            }
+
+            # Include tools if available and within max rounds
+            if tools and tool_manager:
+                api_params["tools"] = tools
+                api_params["tool_choice"] = "auto"
+
+            # Make API call
+            response = self.client.chat.completions.create(**api_params)
+            assistant_message = response.choices[0].message
+
+            # Check if AI wants to call tools
+            if not assistant_message.tool_calls:
+                # No tools requested - return final answer
+                return assistant_message.content or ""
+
+            # Add assistant's tool call message to history
             messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": tool_result
+                "role": "assistant",
+                "content": assistant_message.content,
+                "tool_calls": assistant_message.tool_calls
             })
-        
-        # Prepare final API call without tools
-        final_params = {
-            **self.base_params,
-            "messages": messages
-        }
-        
-        # Get final response
-        final_response = self.client.chat.completions.create(**final_params)
-        return final_response.choices[0].message.content
+
+            # Execute all tool calls
+            tool_execution_failed = False
+            for tool_call in assistant_message.tool_calls:
+                try:
+                    # Parse arguments
+                    function_args = json.loads(tool_call.function.arguments)
+
+                    # Execute tool
+                    tool_result = tool_manager.execute_tool(
+                        tool_call.function.name,
+                        **function_args
+                    )
+
+                    # Add tool result to messages
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_result
+                    })
+
+                except json.JSONDecodeError as e:
+                    # Malformed tool arguments
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": f"Error: Invalid tool arguments format"
+                    })
+                    tool_execution_failed = True
+
+                except Exception as e:
+                    # Tool execution error
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": f"Error: Tool execution failed - {str(e)}"
+                    })
+                    tool_execution_failed = True
+
+            # If at max rounds or tool failed, stop iteration
+            if current_round >= max_tool_rounds or tool_execution_failed:
+                break
+
+        # After loop, make final synthesis call if last message was a tool result
+        if messages[-1]["role"] == "tool":
+            final_params = {
+                **self.base_params,
+                "messages": messages
+            }
+
+            # Include tools for consistency (AI shouldn't call them at this point)
+            if tools:
+                final_params["tools"] = tools
+                final_params["tool_choice"] = "auto"
+
+            final_response = self.client.chat.completions.create(**final_params)
+            return final_response.choices[0].message.content or ""
+
+        # Last message was assistant response (no tools called)
+        return messages[-1]["content"] or ""

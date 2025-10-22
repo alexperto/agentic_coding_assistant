@@ -1,7 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore", message="resource_tracker: There appear to be.*")
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Cookie, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -11,6 +11,7 @@ import os
 
 from config import config
 from rag_system import RAGSystem
+from auth import AuthManager, LoginRequest
 
 # Initialize FastAPI app
 app = FastAPI(title="Course Materials RAG System", root_path="")
@@ -34,6 +35,9 @@ app.add_middleware(
 # Initialize RAG system
 rag_system = RAGSystem(config)
 
+# Initialize Auth system
+auth_manager = AuthManager()
+
 # Pydantic models for request/response
 class QueryRequest(BaseModel):
     """Request model for course queries"""
@@ -51,7 +55,67 @@ class CourseStats(BaseModel):
     total_courses: int
     course_titles: List[str]
 
+class LoginResponse(BaseModel):
+    """Response model for login"""
+    success: bool
+    username: Optional[str] = None
+    message: Optional[str] = None
+
+class AuthStatusResponse(BaseModel):
+    """Response model for auth status check"""
+    authenticated: bool
+    username: Optional[str] = None
+
 # API Endpoints
+
+# Authentication endpoints
+@app.post("/api/login", response_model=LoginResponse)
+async def login(request: LoginRequest, response: Response):
+    """Login endpoint"""
+    session_token = auth_manager.authenticate(request.username, request.password)
+
+    if session_token:
+        # Set session token as HTTP-only cookie
+        response.set_cookie(
+            key="session_token",
+            value=session_token,
+            httponly=True,
+            max_age=86400,  # 24 hours
+            samesite="lax"
+        )
+        return LoginResponse(
+            success=True,
+            username=request.username,
+            message="Login successful"
+        )
+    else:
+        return LoginResponse(
+            success=False,
+            message="Invalid username or password"
+        )
+
+@app.post("/api/logout")
+async def logout(response: Response, session_token: Optional[str] = Cookie(None)):
+    """Logout endpoint"""
+    if session_token:
+        auth_manager.logout(session_token)
+
+    # Clear the session cookie
+    response.delete_cookie(key="session_token")
+    return {"success": True, "message": "Logged out successfully"}
+
+@app.get("/api/auth/status", response_model=AuthStatusResponse)
+async def auth_status(session_token: Optional[str] = Cookie(None)):
+    """Check authentication status"""
+    if not session_token:
+        return AuthStatusResponse(authenticated=False)
+
+    username = auth_manager.validate_session(session_token)
+
+    if username:
+        return AuthStatusResponse(authenticated=True, username=username)
+    else:
+        return AuthStatusResponse(authenticated=False)
 
 @app.post("/api/query", response_model=QueryResponse)
 async def query_documents(request: QueryRequest):

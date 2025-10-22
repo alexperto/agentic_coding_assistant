@@ -3,9 +3,12 @@ const API_URL = '/api';
 
 // Global state
 let currentSessionId = null;
+let currentUser = null;
+let isAuthenticated = false;
 
 // DOM elements
 let chatMessages, chatInput, sendButton, totalCourses, courseTitles, newChatButton;
+let loginContainer, mainContent, headerRight, loginForm, loginError;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -16,34 +19,166 @@ document.addEventListener('DOMContentLoaded', () => {
     totalCourses = document.getElementById('totalCourses');
     courseTitles = document.getElementById('courseTitles');
     newChatButton = document.getElementById('newChatButton');
-    
+
+    // Auth elements
+    loginContainer = document.getElementById('loginContainer');
+    mainContent = document.getElementById('mainContent');
+    headerRight = document.getElementById('headerRight');
+    loginForm = document.getElementById('loginForm');
+    loginError = document.getElementById('loginError');
+
     setupEventListeners();
-    createNewSession();
-    loadCourseStats();
+    checkAuthStatus();
 });
 
 // Event Listeners
 function setupEventListeners() {
+    // Login form
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLogin);
+    }
+
     // New Chat button
-    newChatButton.addEventListener('click', createNewSession);
+    if (newChatButton) {
+        newChatButton.addEventListener('click', createNewSession);
+    }
 
     // Chat functionality
-    sendButton.addEventListener('click', sendMessage);
-    chatInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') sendMessage();
-    });
-
+    if (sendButton) {
+        sendButton.addEventListener('click', sendMessage);
+    }
+    if (chatInput) {
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+    }
 
     // Suggested questions
     document.querySelectorAll('.suggested-item').forEach(button => {
         button.addEventListener('click', (e) => {
             const question = e.target.getAttribute('data-question');
-            chatInput.value = question;
-            sendMessage();
+            if (chatInput) {
+                chatInput.value = question;
+                sendMessage();
+            }
         });
     });
 }
 
+// Authentication Functions
+async function checkAuthStatus() {
+    try {
+        const response = await fetch(`${API_URL}/auth/status`, {
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            showLoginScreen();
+            return;
+        }
+
+        const data = await response.json();
+
+        if (data.authenticated) {
+            isAuthenticated = true;
+            currentUser = data.username;
+            showMainContent();
+            createNewSession();
+            loadCourseStats();
+        } else {
+            showLoginScreen();
+        }
+    } catch (error) {
+        console.error('Error checking auth status:', error);
+        showLoginScreen();
+    }
+}
+
+async function handleLogin(e) {
+    e.preventDefault();
+
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    const loginButton = document.getElementById('loginButton');
+
+    // Disable form
+    loginButton.disabled = true;
+    loginError.style.display = 'none';
+
+    try {
+        const response = await fetch(`${API_URL}/login`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify({ username, password })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            isAuthenticated = true;
+            currentUser = data.username;
+            showMainContent();
+            createNewSession();
+            loadCourseStats();
+        } else {
+            loginError.textContent = data.message || 'Invalid username or password';
+            loginError.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        loginError.textContent = 'An error occurred during login';
+        loginError.style.display = 'block';
+    } finally {
+        loginButton.disabled = false;
+    }
+}
+
+async function handleLogout() {
+    try {
+        await fetch(`${API_URL}/logout`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        isAuthenticated = false;
+        currentUser = null;
+        currentSessionId = null;
+        showLoginScreen();
+    } catch (error) {
+        console.error('Logout error:', error);
+    }
+}
+
+function showLoginScreen() {
+    if (loginContainer) loginContainer.style.display = 'flex';
+    if (mainContent) mainContent.style.display = 'none';
+    if (headerRight) headerRight.innerHTML = '';
+}
+
+function showMainContent() {
+    if (loginContainer) loginContainer.style.display = 'none';
+    if (mainContent) mainContent.style.display = 'flex';
+    updateHeaderWithUser();
+}
+
+function updateHeaderWithUser() {
+    if (!headerRight || !currentUser) return;
+
+    headerRight.innerHTML = `
+        <div class="user-info">
+            <span class="username-display">${escapeHtml(currentUser)}</span>
+            <button class="logout-button" id="logoutButton">Logout</button>
+        </div>
+    `;
+
+    const logoutButton = document.getElementById('logoutButton');
+    if (logoutButton) {
+        logoutButton.addEventListener('click', handleLogout);
+    }
+}
 
 // Chat Functions
 async function sendMessage() {

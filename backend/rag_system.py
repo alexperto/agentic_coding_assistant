@@ -6,24 +6,43 @@ from ai_generator import AIGenerator
 from session_manager import SessionManager
 from search_tools import ToolManager, CourseSearchTool, CourseOutlineTool
 from models import Course, Lesson, CourseChunk
+from token_manager import TokenManager
 
 class RAGSystem:
     """Main orchestrator for the Retrieval-Augmented Generation system"""
     
     def __init__(self, config):
         self.config = config
-        
+
         # Initialize core components
         self.document_processor = DocumentProcessor(config.CHUNK_SIZE, config.CHUNK_OVERLAP)
         self.vector_store = VectorStore(config.CHROMA_PATH, config.EMBEDDING_MODEL, config.MAX_RESULTS)
+
+        # Initialize TokenManager if OAuth credentials are configured
+        token_manager = None
+        if config.VERSA_CLIENT_ID and config.VERSA_CLIENT_SECRET:
+            try:
+                token_manager = TokenManager(
+                    config.VERSA_CLIENT_ID,
+                    config.VERSA_CLIENT_SECRET,
+                    config.OKTA_TOKEN_URL
+                )
+                print("[RAGSystem] Using dynamic OAuth token management")
+            except ValueError as e:
+                print(f"[RAGSystem] Warning: Failed to initialize TokenManager: {e}")
+                print("[RAGSystem] Falling back to static API key")
+
+        # Initialize AIGenerator with TokenManager or static API key
+        api_key_or_token_manager = token_manager if token_manager else config.AZURE_OPENAI_API_KEY
         self.ai_generator = AIGenerator(
             config.AZURE_OPENAI_ENDPOINT,
-            config.AZURE_OPENAI_API_KEY,
+            api_key_or_token_manager,
             config.AZURE_OPENAI_API_VERSION,
             config.AZURE_OPENAI_DEPLOYMENT
         )
+
         self.session_manager = SessionManager(config.MAX_HISTORY)
-        
+
         # Initialize search tools
         self.tool_manager = ToolManager()
         self.search_tool = CourseSearchTool(self.vector_store)

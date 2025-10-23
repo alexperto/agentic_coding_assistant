@@ -1,7 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore", message="resource_tracker: There appear to be.*")
 
-from fastapi import FastAPI, HTTPException, Cookie, Response
+from fastapi import FastAPI, HTTPException, Cookie, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -37,6 +37,18 @@ rag_system = RAGSystem(config)
 
 # Initialize Auth system
 auth_manager = AuthManager()
+
+# Authentication dependency
+async def get_current_user(session_token: Optional[str] = Cookie(None)) -> str:
+    """Dependency to get current authenticated user"""
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    username = auth_manager.validate_session(session_token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    return username
 
 # Pydantic models for request/response
 class QueryRequest(BaseModel):
@@ -124,24 +136,31 @@ async def auth_status(session_token: Optional[str] = Cookie(None)):
         return AuthStatusResponse(authenticated=False)
 
 @app.post("/api/query", response_model=QueryResponse)
-async def query_documents(request: QueryRequest):
-    """Process a query and return response with sources"""
-    #try:
-    # Create session if not provided
-    session_id = request.session_id
-    if not session_id:
-        session_id = rag_system.session_manager.create_session()
-    
-    # Process query using RAG system
-    answer, sources = rag_system.query(request.query, session_id)
-    
-    return QueryResponse(
-        answer=answer,
-        sources=sources,
-        session_id=session_id
-    )
-    #except Exception as e:
-    #    raise HTTPException(status_code=500, detail=str(e))
+async def query_documents(
+    request: QueryRequest,
+    username: str = Depends(get_current_user)
+):
+    """Process a query and return response with sources (requires authentication)"""
+    try:
+        # Create session if not provided
+        session_id = request.session_id
+        if not session_id:
+            session_id = rag_system.session_manager.create_session()
+
+        # Process query using RAG system
+        answer, sources = rag_system.query(request.query, session_id)
+
+        return QueryResponse(
+            answer=answer,
+            sources=sources,
+            session_id=session_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # Log the error (in production, use proper logging)
+        print(f"Error processing query: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/courses", response_model=CourseStats)
 async def get_course_stats():

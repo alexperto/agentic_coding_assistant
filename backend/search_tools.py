@@ -1,6 +1,8 @@
 from typing import Dict, Any, Optional, Protocol
 from abc import ABC, abstractmethod
 from vector_store import VectorStore, SearchResults
+import requests
+import json
 
 
 class Tool(ABC):
@@ -196,6 +198,123 @@ class CourseOutlineTool(Tool):
                 parts.append(f"  Lesson {lesson_num}: {lesson_title}")
 
         return "\n".join(parts)
+
+
+class NutritionTool(Tool):
+    """Tool for answering nutrition, food, and diet-related questions via UCSF API"""
+
+    def __init__(self, token_manager):
+        """
+        Initialize NutritionTool with TokenManager for authentication.
+
+        Args:
+            token_manager: TokenManager instance for OAuth token retrieval
+        """
+        self.token_manager = token_manager
+        self.api_endpoint = "https://dev-unified-api.ucsf.edu/general/versaassistant/api/answer"
+
+    def get_tool_definition(self) -> Dict[str, Any]:
+        """Return OpenAI function definition for this tool"""
+        return {
+            "type": "function",
+            "function": {
+                "name": "ask_nutrition_expert",
+                "description": "Ask a nutrition expert about food, diet, or nutrition-related questions. Use this tool ONLY for questions about nutrition, food, diet, eating habits, nutritional values, or meal planning.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The nutrition, food, or diet-related question to ask the expert"
+                        }
+                    },
+                    "required": ["question"]
+                }
+            }
+        }
+
+    def execute(self, question: str) -> str:
+        """
+        Execute the nutrition query by calling the UCSF API.
+
+        Args:
+            question: The nutrition-related question from the user
+
+        Returns:
+            Response from the nutrition API or error message
+        """
+        try:
+            # Get authentication token
+            if not self.token_manager:
+                return "Error: Authentication not configured for nutrition queries."
+
+            token = self.token_manager.get_token()
+
+            # Prepare request headers
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}"
+            }
+
+            # Prepare request body
+            body = {
+                "userid": "john.doe@ucsf.edu",
+                "datasource": "eureka_fim",
+                "model": "GPT-4o",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant expert on nutrition, respond briefly"
+                    },
+                    {
+                        "role": "user",
+                        "content": question
+                    }
+                ]
+            }
+
+            # Make API request
+            response = requests.post(
+                self.api_endpoint,
+                headers=headers,
+                json=body,
+                timeout=30  # 30 second timeout for API calls
+            )
+
+            # Check for HTTP errors
+            response.raise_for_status()
+
+            # Parse response
+            response_data = response.json()
+
+            # Extract the answer from the response
+            # The API response structure may vary, so we handle common formats
+            if isinstance(response_data, dict):
+                # Try common response field names
+                answer = (
+                    response_data.get("answer") or
+                    response_data.get("response") or
+                    response_data.get("content") or
+                    response_data.get("message")
+                )
+
+                if answer:
+                    return str(answer)
+                else:
+                    # If no recognized field, return the whole response as JSON
+                    return json.dumps(response_data, indent=2)
+            else:
+                # If response is not a dict, return as string
+                return str(response_data)
+
+        except requests.exceptions.Timeout:
+            return "Error: Nutrition API request timed out. Please try again."
+        except requests.exceptions.RequestException as e:
+            return f"Error: Failed to connect to nutrition API - {str(e)}"
+        except json.JSONDecodeError:
+            return "Error: Invalid response format from nutrition API."
+        except Exception as e:
+            return f"Error: Unexpected error while querying nutrition API - {str(e)}"
 
 
 class ToolManager:

@@ -4,7 +4,7 @@ from document_processor import DocumentProcessor
 from vector_store import VectorStore
 from ai_generator import AIGenerator
 from session_manager import SessionManager
-from search_tools import ToolManager, CourseSearchTool, CourseOutlineTool
+from search_tools import ToolManager, CourseSearchTool, CourseOutlineTool, NutritionTool
 from models import Course, Lesson, CourseChunk
 from token_manager import create_token_manager_from_env
 
@@ -41,6 +41,10 @@ class RAGSystem:
         # Initialize course outline tool
         self.outline_tool = CourseOutlineTool(self.vector_store)
         self.tool_manager.register_tool(self.outline_tool)
+
+        # Initialize nutrition tool
+        self.nutrition_tool = NutritionTool(token_manager)
+        self.tool_manager.register_tool(self.nutrition_tool)
     
     def add_course_document(self, file_path: str) -> Tuple[Course, int]:
         """

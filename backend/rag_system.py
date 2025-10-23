@@ -6,7 +6,7 @@ from ai_generator import AIGenerator
 from session_manager import SessionManager
 from search_tools import ToolManager, CourseSearchTool, CourseOutlineTool
 from models import Course, Lesson, CourseChunk
-from token_manager import TokenManager
+from token_manager import create_token_manager_from_env
 
 class RAGSystem:
     """Main orchestrator for the Retrieval-Augmented Generation system"""
@@ -18,25 +18,15 @@ class RAGSystem:
         self.document_processor = DocumentProcessor(config.CHUNK_SIZE, config.CHUNK_OVERLAP)
         self.vector_store = VectorStore(config.CHROMA_PATH, config.EMBEDDING_MODEL, config.MAX_RESULTS)
 
-        # Initialize TokenManager if OAuth credentials are configured
-        token_manager = None
-        if config.VERSA_CLIENT_ID and config.VERSA_CLIENT_SECRET:
-            try:
-                token_manager = TokenManager(
-                    config.VERSA_CLIENT_ID,
-                    config.VERSA_CLIENT_SECRET,
-                    config.OKTA_TOKEN_URL
-                )
-                print("[RAGSystem] Using dynamic OAuth token management")
-            except ValueError as e:
-                print(f"[RAGSystem] Warning: Failed to initialize TokenManager: {e}")
-                print("[RAGSystem] Falling back to static API key")
+        # Initialize TokenManager from environment variables
+        token_manager = create_token_manager_from_env()
+        if token_manager:
+            print("[RAGSystem] Using dynamic OAuth token management")
 
-        # Initialize AIGenerator with TokenManager or static API key
-        api_key_or_token_manager = token_manager if token_manager else config.AZURE_OPENAI_API_KEY
+        # Initialize AIGenerator with TokenManager
         self.ai_generator = AIGenerator(
             config.AZURE_OPENAI_ENDPOINT,
-            api_key_or_token_manager,
+            token_manager,
             config.AZURE_OPENAI_API_VERSION,
             config.AZURE_OPENAI_DEPLOYMENT
         )

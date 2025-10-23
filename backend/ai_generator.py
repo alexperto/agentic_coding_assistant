@@ -1,5 +1,5 @@
 from openai import AzureOpenAI
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any
 import json
 
 class AIGenerator:
@@ -44,35 +44,23 @@ All responses must be:
 Provide only the direct answer to what was asked.
 """
     
-    def __init__(self, endpoint: str, api_key_or_token_manager: Union[str, Any], api_version: str, deployment: str):
+    def __init__(self, endpoint: str, token_manager: Any, api_version: str, deployment: str):
         """
         Initialize AIGenerator with Azure OpenAI configuration.
 
         Args:
             endpoint: Azure OpenAI endpoint URL
-            api_key_or_token_manager: Either a static API key (str) or a TokenManager instance
+            token_manager: TokenManager instance for dynamic OAuth token retrieval
             api_version: Azure OpenAI API version
             deployment: Azure OpenAI deployment name
-
-        The method supports two modes:
-        1. Static API key mode: Pass a string API key (backward compatible)
-        2. Dynamic token mode: Pass a TokenManager instance for auto-refreshing tokens
         """
         self.endpoint = endpoint
         self.api_version = api_version
         self.deployment = deployment
+        self.token_manager = token_manager
 
-        # Determine if using TokenManager or static API key
-        if hasattr(api_key_or_token_manager, 'get_token'):
-            # TokenManager mode - dynamic token retrieval
-            self.token_manager = api_key_or_token_manager
-            self.static_api_key = None
+        if token_manager:
             print("[AIGenerator] Initialized with dynamic OAuth token management")
-        else:
-            # Static API key mode - backward compatible
-            self.token_manager = None
-            self.static_api_key = api_key_or_token_manager
-            print("[AIGenerator] Initialized with static API key")
 
         # Pre-build base API parameters
         self.base_params = {
@@ -85,27 +73,17 @@ Provide only the direct answer to what was asked.
         """
         Get AzureOpenAI client with current valid token.
 
-        For dynamic token mode, this fetches a fresh token on each call.
-        For static API key mode, this uses the same key.
+        Fetches a fresh token from TokenManager on each call.
 
         Returns:
             Configured AzureOpenAI client instance
         """
-        if self.token_manager:
-            # Dynamic mode - get fresh token
-            current_token = self.token_manager.get_token()
-            return AzureOpenAI(
-                base_url=self.endpoint,
-                azure_ad_token=current_token,
-                api_version=self.api_version
-            )
-        else:
-            # Static mode - use static key
-            return AzureOpenAI(
-                base_url=self.endpoint,
-                azure_ad_token=self.static_api_key,
-                api_version=self.api_version
-            )
+        current_token = self.token_manager.get_token()
+        return AzureOpenAI(
+            base_url=self.endpoint,
+            azure_ad_token=current_token,
+            api_version=self.api_version
+        )
     
     def generate_response(self,
                          query: str,

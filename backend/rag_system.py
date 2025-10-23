@@ -6,24 +6,33 @@ from ai_generator import AIGenerator
 from session_manager import SessionManager
 from search_tools import ToolManager, CourseSearchTool, CourseOutlineTool
 from models import Course, Lesson, CourseChunk
+from token_manager import create_token_manager_from_env
 
 class RAGSystem:
     """Main orchestrator for the Retrieval-Augmented Generation system"""
     
     def __init__(self, config):
         self.config = config
-        
+
         # Initialize core components
         self.document_processor = DocumentProcessor(config.CHUNK_SIZE, config.CHUNK_OVERLAP)
         self.vector_store = VectorStore(config.CHROMA_PATH, config.EMBEDDING_MODEL, config.MAX_RESULTS)
+
+        # Initialize TokenManager from environment variables
+        token_manager = create_token_manager_from_env()
+        if token_manager:
+            print("[RAGSystem] Using dynamic OAuth token management")
+
+        # Initialize AIGenerator with TokenManager
         self.ai_generator = AIGenerator(
             config.AZURE_OPENAI_ENDPOINT,
-            config.AZURE_OPENAI_API_KEY,
+            token_manager,
             config.AZURE_OPENAI_API_VERSION,
             config.AZURE_OPENAI_DEPLOYMENT
         )
+
         self.session_manager = SessionManager(config.MAX_HISTORY)
-        
+
         # Initialize search tools
         self.tool_manager = ToolManager()
         self.search_tool = CourseSearchTool(self.vector_store)

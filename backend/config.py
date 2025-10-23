@@ -10,9 +10,16 @@ class Config:
     """Configuration settings for the RAG system"""
     # Azure OpenAI API settings
     AZURE_OPENAI_ENDPOINT: str = os.getenv("AZURE_OPENAI_ENDPOINT", "")
-    AZURE_OPENAI_API_KEY: str = os.getenv("AZURE_OPENAI_API_KEY", "")
     AZURE_OPENAI_API_VERSION: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
     AZURE_OPENAI_DEPLOYMENT: str = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4")
+
+    # OAuth Token settings (for dynamic API key)
+    VERSA_CLIENT_ID: str = os.getenv("VERSA_CLIENT_ID", "")
+    VERSA_CLIENT_SECRET: str = os.getenv("VERSA_CLIENT_SECRET", "")
+    OKTA_TOKEN_URL: str = os.getenv(
+        "OKTA_TOKEN_URL",
+        "https://uc-sf.okta.com/oauth2/ausnwf6tyaq6v47QF5d7/v1/token"
+    )
 
     # Embedding model settings
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"

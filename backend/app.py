@@ -75,11 +75,13 @@ async def login(request: LoginRequest, response: Response):
     session_token = auth_manager.authenticate(request.username, request.password)
 
     if session_token:
-        # Set session token as HTTP-only cookie
+        # Set session token as HTTP-only cookie with security flags
+        is_production = config.ENVIRONMENT == "production"
         response.set_cookie(
             key="session_token",
             value=session_token,
             httponly=True,
+            secure=is_production,  # Require HTTPS in production
             max_age=86400,  # 24 hours
             samesite="lax"
         )
@@ -100,8 +102,12 @@ async def logout(response: Response, session_token: Optional[str] = Cookie(None)
     if session_token:
         auth_manager.logout(session_token)
 
-    # Clear the session cookie
-    response.delete_cookie(key="session_token")
+    # Clear the session cookie with matching parameters
+    response.delete_cookie(
+        key="session_token",
+        path="/",
+        samesite="lax"
+    )
     return {"success": True, "message": "Logged out successfully"}
 
 @app.get("/api/auth/status", response_model=AuthStatusResponse)

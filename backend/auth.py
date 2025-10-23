@@ -3,7 +3,7 @@ from typing import Optional, Dict
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 import secrets
-import hashlib
+import bcrypt
 
 
 class User(BaseModel):
@@ -46,8 +46,8 @@ class AuthManager:
         self.create_user("admin", "admin")
 
     def _hash_password(self, password: str) -> str:
-        """Hash a password using SHA-256"""
-        return hashlib.sha256(password.encode()).hexdigest()
+        """Hash a password using bcrypt"""
+        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
     def create_user(self, username: str, password: str) -> bool:
         """Create a new user"""
@@ -67,9 +67,9 @@ class AuthManager:
             return None
 
         user = self.users[username]
-        password_hash = self._hash_password(password)
 
-        if user.password_hash != password_hash:
+        # Use bcrypt's constant-time comparison to prevent timing attacks
+        if not bcrypt.checkpw(password.encode(), user.password_hash.encode()):
             return None
 
         # Create session token

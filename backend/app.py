@@ -1,7 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore", message="resource_tracker: There appear to be.*")
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Cookie, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -11,6 +11,7 @@ import os
 
 from config import config
 from rag_system import RAGSystem
+from auth import AuthManager, LoginRequest
 
 # Initialize FastAPI app
 app = FastAPI(title="Course Materials RAG System", root_path="")
@@ -34,6 +35,21 @@ app.add_middleware(
 # Initialize RAG system
 rag_system = RAGSystem(config)
 
+# Initialize Auth system
+auth_manager = AuthManager()
+
+# Authentication dependency
+async def get_current_user(session_token: Optional[str] = Cookie(None)) -> str:
+    """Dependency to get current authenticated user"""
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    username = auth_manager.validate_session(session_token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    return username
+
 # Pydantic models for request/response
 class QueryRequest(BaseModel):
     """Request model for course queries"""
@@ -51,27 +67,100 @@ class CourseStats(BaseModel):
     total_courses: int
     course_titles: List[str]
 
+class LoginResponse(BaseModel):
+    """Response model for login"""
+    success: bool
+    username: Optional[str] = None
+    message: Optional[str] = None
+
+class AuthStatusResponse(BaseModel):
+    """Response model for auth status check"""
+    authenticated: bool
+    username: Optional[str] = None
+
 # API Endpoints
 
-@app.post("/api/query", response_model=QueryResponse)
-async def query_documents(request: QueryRequest):
-    """Process a query and return response with sources"""
-    #try:
-    # Create session if not provided
-    session_id = request.session_id
-    if not session_id:
-        session_id = rag_system.session_manager.create_session()
-    
-    # Process query using RAG system
-    answer, sources = rag_system.query(request.query, session_id)
-    
-    return QueryResponse(
-        answer=answer,
-        sources=sources,
-        session_id=session_id
+# Authentication endpoints
+@app.post("/api/login", response_model=LoginResponse)
+async def login(request: LoginRequest, response: Response):
+    """Login endpoint"""
+    session_token = auth_manager.authenticate(request.username, request.password)
+
+    if session_token:
+        # Set session token as HTTP-only cookie with security flags
+        is_production = config.ENVIRONMENT == "production"
+        response.set_cookie(
+            key="session_token",
+            value=session_token,
+            httponly=True,
+            secure=is_production,  # Require HTTPS in production
+            max_age=86400,  # 24 hours
+            samesite="lax"
+        )
+        return LoginResponse(
+            success=True,
+            username=request.username,
+            message="Login successful"
+        )
+    else:
+        return LoginResponse(
+            success=False,
+            message="Invalid username or password"
+        )
+
+@app.post("/api/logout")
+async def logout(response: Response, session_token: Optional[str] = Cookie(None)):
+    """Logout endpoint"""
+    if session_token:
+        auth_manager.logout(session_token)
+
+    # Clear the session cookie with matching parameters
+    response.delete_cookie(
+        key="session_token",
+        path="/",
+        samesite="lax"
     )
-    #except Exception as e:
-    #    raise HTTPException(status_code=500, detail=str(e))
+    return {"success": True, "message": "Logged out successfully"}
+
+@app.get("/api/auth/status", response_model=AuthStatusResponse)
+async def auth_status(session_token: Optional[str] = Cookie(None)):
+    """Check authentication status"""
+    if not session_token:
+        return AuthStatusResponse(authenticated=False)
+
+    username = auth_manager.validate_session(session_token)
+
+    if username:
+        return AuthStatusResponse(authenticated=True, username=username)
+    else:
+        return AuthStatusResponse(authenticated=False)
+
+@app.post("/api/query", response_model=QueryResponse)
+async def query_documents(
+    request: QueryRequest,
+    username: str = Depends(get_current_user)
+):
+    """Process a query and return response with sources (requires authentication)"""
+    try:
+        # Create session if not provided
+        session_id = request.session_id
+        if not session_id:
+            session_id = rag_system.session_manager.create_session()
+
+        # Process query using RAG system
+        answer, sources = rag_system.query(request.query, session_id)
+
+        return QueryResponse(
+            answer=answer,
+            sources=sources,
+            session_id=session_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # Log the error (in production, use proper logging)
+        print(f"Error processing query: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/courses", response_model=CourseStats)
 async def get_course_stats():

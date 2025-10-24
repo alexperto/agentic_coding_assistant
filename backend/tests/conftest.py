@@ -158,13 +158,13 @@ def mock_ai_client_with_tool_call():
 
 
 @pytest.fixture
-def ai_generator_factory():
+def ai_generator_factory(mock_token_manager):
     """Factory to create AIGenerator instances with standard test parameters"""
     def _create():
         from ai_generator import AIGenerator
         return AIGenerator(
             endpoint="https://test.openai.azure.com",
-            api_key="test-key",
+            token_manager=mock_token_manager,
             api_version="2024-02-01",
             deployment="gpt-4"
         )
@@ -236,3 +236,93 @@ def get_messages_from_call(mock_client, call_index=0):
     if call_index >= len(calls):
         raise IndexError(f"Call index {call_index} out of range (only {len(calls)} calls)")
     return calls[call_index][1]["messages"]
+
+
+# ============================================================================
+# Token Manager Mocks
+# ============================================================================
+
+@pytest.fixture
+def mock_token_manager():
+    """Create a mock TokenManager for OAuth authentication"""
+    mock_tm = Mock()
+    mock_tm.get_token.return_value = "mock-oauth-token-12345"
+    return mock_tm
+
+
+@pytest.fixture
+def mock_token_manager_failing():
+    """Create a mock TokenManager that fails to get tokens"""
+    mock_tm = Mock()
+    mock_tm.get_token.side_effect = RuntimeError("OAuth token request failed")
+    return mock_tm
+
+
+# ============================================================================
+# Nutrition API Response Mocks
+# ============================================================================
+
+@pytest.fixture
+def successful_nutrition_response():
+    """Mock successful nutrition API response"""
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_response.headers = {"Content-Type": "application/json"}
+    mock_response.json.return_value = {
+        "answer": "Bananas are a good source of potassium, containing about 422mg per medium banana. They also provide vitamin B6, vitamin C, and dietary fiber."
+    }
+    return mock_response
+
+
+@pytest.fixture
+def nutrition_response_alternative_format():
+    """Mock nutrition API response with different field name"""
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_response.headers = {"Content-Type": "application/json"}
+    mock_response.json.return_value = {
+        "response": "Apples are rich in antioxidants and dietary fiber."
+    }
+    return mock_response
+
+
+@pytest.fixture
+def nutrition_response_unknown_format():
+    """Mock nutrition API response with unrecognized format"""
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_response.headers = {"Content-Type": "application/json"}
+    mock_response.json.return_value = {
+        "data": {
+            "text": "Some nutrition information"
+        }
+    }
+    return mock_response
+
+
+@pytest.fixture
+def nutrition_401_error():
+    """Mock 401 Unauthorized nutrition API response"""
+    import requests
+    mock_response = Mock()
+    mock_response.status_code = 401
+    mock_response.headers = {}
+    mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("401 Unauthorized")
+    return mock_response
+
+
+@pytest.fixture
+def nutrition_timeout_error():
+    """Mock timeout error for nutrition API"""
+    import requests
+    return requests.exceptions.Timeout("Request timed out")
+
+
+@pytest.fixture
+def nutrition_invalid_json():
+    """Mock nutrition API response with invalid JSON"""
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_response.headers = {}
+    mock_response.json.side_effect = json.JSONDecodeError("Invalid JSON", "", 0)
+    return mock_response

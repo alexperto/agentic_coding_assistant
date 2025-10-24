@@ -1,6 +1,8 @@
 from typing import Dict, Any, Optional, Protocol
 from abc import ABC, abstractmethod
 from vector_store import VectorStore, SearchResults
+import requests
+import json
 
 
 class Tool(ABC):
@@ -196,6 +198,222 @@ class CourseOutlineTool(Tool):
                 parts.append(f"  Lesson {lesson_num}: {lesson_title}")
 
         return "\n".join(parts)
+
+
+class NutritionTool(Tool):
+    """Tool for answering nutrition, food, and diet-related questions via UCSF API"""
+
+    def __init__(self, token_manager):
+        """
+        Initialize NutritionTool with TokenManager for authentication.
+
+        Args:
+            token_manager: TokenManager instance for OAuth token retrieval
+        """
+        self.token_manager = token_manager
+        self.api_endpoint = "https://dev-unified-api.ucsf.edu/general/versaassistant/api/answer"
+        self.last_sources = []  # Track sources from last query
+
+    def get_tool_definition(self) -> Dict[str, Any]:
+        """Return OpenAI function definition for this tool"""
+        return {
+            "type": "function",
+            "function": {
+                "name": "ask_nutrition_expert",
+                "description": "Ask a nutrition expert about food, diet, or nutrition-related questions. Use this tool ONLY for questions about nutrition, food, diet, eating habits, nutritional values, or meal planning.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The nutrition, food, or diet-related question to ask the expert"
+                        }
+                    },
+                    "required": ["question"]
+                }
+            }
+        }
+
+    def _extract_sources(self, answer: str) -> tuple[str, list]:
+        """
+        Extract source citations from the answer and format them for the UI.
+
+        Args:
+            answer: The answer text containing HTML source links
+
+        Returns:
+            Tuple of (cleaned_answer, sources_list)
+            - cleaned_answer: Answer text with source section removed
+            - sources_list: List of dicts with "text" and "url" keys
+        """
+        import re
+        from urllib.parse import urljoin
+
+        sources = []
+
+        # Pattern to match HTML links: <a href="..." target="_blank">link text</a>
+        link_pattern = r'<a\s+href="([^"]+)"[^>]*>([^<]+)</a>'
+
+        # Find all links in the answer
+        matches = re.findall(link_pattern, answer)
+
+        for href, link_text in matches:
+            # Convert relative URLs to absolute URLs
+            # Base URL for the UCSF API
+            base_url = "https://dev-unified-api.ucsf.edu"
+            full_url = urljoin(base_url, href)
+
+            sources.append({
+                "text": link_text.strip(),
+                "url": full_url
+            })
+
+        # Remove the "Cited Sources:" section and all links from the answer
+        # Split by "Cited Sources:" and take the first part
+        if "Cited Sources:" in answer or "cited sources:" in answer.lower():
+            # Use case-insensitive split
+            answer_parts = re.split(r'cited sources:?', answer, flags=re.IGNORECASE)
+            cleaned_answer = answer_parts[0].strip()
+        else:
+            # If no "Cited Sources" section, just remove all HTML links
+            cleaned_answer = re.sub(link_pattern, '', answer).strip()
+
+        return cleaned_answer, sources
+
+    def execute(self, question: str) -> str:
+        """
+        Execute the nutrition query by calling the UCSF API.
+
+        Args:
+            question: The nutrition-related question from the user
+
+        Returns:
+            Response from the nutrition API or error message
+        """
+        try:
+            # Get authentication token
+            if not self.token_manager:
+                self.last_sources = []
+                return "Error: Authentication not configured for nutrition queries."
+
+            token = self.token_manager.get_token()
+
+            # Prepare request headers
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}"
+            }
+
+            # Prepare request body
+            body = {
+                "userid": "john.doe@ucsf.edu",
+                "datasource": "eureka_fim",
+                "model": "GPT-4o",
+                "temperature": "0.0",
+                "context": "1",
+                "returndoc": "1",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant expert on nutrition, respond briefly"
+                    },
+                    {
+                        "role": "user",
+                        "content": question
+                    }
+                ]
+            }
+
+            # Log the request details
+            print("\n" + "="*70)
+            print("NUTRITION API REQUEST DETAILS")
+            print("="*70)
+            print(f"URL: {self.api_endpoint}")
+            print(f"\nRequest Headers:")
+            for key, value in headers.items():
+                if key == "Authorization":
+                    print(f"  {key}: Bearer {token[:30]}...{token[-10:]} (truncated)")
+                else:
+                    print(f"  {key}: {value}")
+            print(f"\nRequest Body:")
+            print(json.dumps(body, indent=2))
+            print("="*70)
+
+            # Make API request
+            response = requests.post(
+                self.api_endpoint,
+                headers=headers,
+                json=body,
+                timeout=30  # 30 second timeout for API calls
+            )
+
+            # Check for HTTP errors first (before logging)
+            response.raise_for_status()
+
+            # Log the response details (only for successful responses)
+            try:
+                print("\n" + "="*70)
+                print("NUTRITION API RESPONSE DETAILS")
+                print("="*70)
+                print(f"Status Code: {response.status_code}")
+                print(f"\nResponse Headers:")
+                for key, value in response.headers.items():
+                    print(f"  {key}: {value}")
+
+                print(f"\nResponse Body:")
+                try:
+                    response_json = response.json()
+                    print(json.dumps(response_json, indent=2))
+                except:
+                    print(f"  (Raw text): {response.text[:500]}")
+                print("="*70 + "\n")
+            except Exception as log_error:
+                # If logging fails, continue with processing
+                print(f"[Warning: Response logging failed: {log_error}]")
+
+            # Parse response
+            response_data = response.json()
+
+            # Extract the answer from the response
+            # The API response structure may vary, so we handle common formats
+            if isinstance(response_data, dict):
+                # Try common response field names
+                answer = (
+                    response_data.get("answer") or
+                    response_data.get("response") or
+                    response_data.get("content") or
+                    response_data.get("message")
+                )
+
+                if answer:
+                    # Extract sources and clean the answer
+                    cleaned_answer, sources = self._extract_sources(str(answer))
+
+                    # Store sources for retrieval by ToolManager
+                    self.last_sources = sources
+
+                    return cleaned_answer
+                else:
+                    # If no recognized field, return the whole response as JSON
+                    self.last_sources = []
+                    return json.dumps(response_data, indent=2)
+            else:
+                # If response is not a dict, return as string
+                self.last_sources = []
+                return str(response_data)
+
+        except requests.exceptions.Timeout:
+            self.last_sources = []
+            return "Error: Nutrition API request timed out. Please try again."
+        except requests.exceptions.RequestException as e:
+            self.last_sources = []
+            return f"Error: Failed to connect to nutrition API - {str(e)}"
+        except json.JSONDecodeError:
+            self.last_sources = []
+            return "Error: Invalid response format from nutrition API."
+        except Exception as e:
+            self.last_sources = []
+            return f"Error: Unexpected error while querying nutrition API - {str(e)}"
 
 
 class ToolManager:

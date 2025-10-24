@@ -261,6 +261,9 @@ class NutritionTool(Tool):
                 "userid": "john.doe@ucsf.edu",
                 "datasource": "eureka_fim",
                 "model": "GPT-4o",
+                "temperature": "0.0",
+                "context": "1",
+                "returndoc": "1",
                 "messages": [
                     {
                         "role": "system",
@@ -273,6 +276,21 @@ class NutritionTool(Tool):
                 ]
             }
 
+            # Log the request details
+            print("\n" + "="*70)
+            print("NUTRITION API REQUEST DETAILS")
+            print("="*70)
+            print(f"URL: {self.api_endpoint}")
+            print(f"\nRequest Headers:")
+            for key, value in headers.items():
+                if key == "Authorization":
+                    print(f"  {key}: Bearer {token[:30]}...{token[-10:]} (truncated)")
+                else:
+                    print(f"  {key}: {value}")
+            print(f"\nRequest Body:")
+            print(json.dumps(body, indent=2))
+            print("="*70)
+
             # Make API request
             response = requests.post(
                 self.api_endpoint,
@@ -280,6 +298,23 @@ class NutritionTool(Tool):
                 json=body,
                 timeout=30  # 30 second timeout for API calls
             )
+
+            # Log the response details
+            print("\n" + "="*70)
+            print("NUTRITION API RESPONSE DETAILS")
+            print("="*70)
+            print(f"Status Code: {response.status_code}")
+            print(f"\nResponse Headers:")
+            for key, value in response.headers.items():
+                print(f"  {key}: {value}")
+
+            print(f"\nResponse Body:")
+            try:
+                response_json = response.json()
+                print(json.dumps(response_json, indent=2))
+            except:
+                print(f"  (Raw text): {response.text[:500]}")
+            print("="*70 + "\n")
 
             # Check for HTTP errors
             response.raise_for_status()

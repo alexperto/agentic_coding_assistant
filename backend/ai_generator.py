@@ -10,7 +10,7 @@ class AIGenerator:
     @staticmethod
     def _load_system_prompt() -> str:
         """Load system prompt from text file"""
-        prompt_file = os.path.join(os.path.dirname(__file__), 'system_prompt.txt')
+        prompt_file = os.path.join(os.path.dirname(__file__), 'eureka_system_prompt.txt')
         try:
             with open(prompt_file, 'r', encoding='utf-8') as f:
                 return f.read().strip()

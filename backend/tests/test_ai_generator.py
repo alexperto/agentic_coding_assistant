@@ -34,11 +34,11 @@ def create_mock_tool_call(tool_id, function_name, arguments):
 class TestAIGeneratorBasics:
     """Basic tests for AIGenerator"""
 
-    def test_initialization(self):
+    def test_initialization(self, mock_token_manager):
         """Test AIGenerator can be initialized"""
         generator = AIGenerator(
             endpoint="https://test.openai.azure.com",
-            api_key="test-key",
+            token_manager=mock_token_manager,
             api_version="2024-02-01",
             deployment="gpt-4"
         )
@@ -51,7 +51,7 @@ class TestAIGeneratorBasics:
     def test_system_prompt_exists(self):
         """Test that system prompt is defined"""
         assert AIGenerator.SYSTEM_PROMPT is not None
-        assert "course materials" in AIGenerator.SYSTEM_PROMPT.lower()
+        assert "assistant" in AIGenerator.SYSTEM_PROMPT.lower()
         assert "tools" in AIGenerator.SYSTEM_PROMPT.lower()
 
 

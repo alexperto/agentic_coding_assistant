@@ -212,6 +212,7 @@ class NutritionTool(Tool):
         """
         self.token_manager = token_manager
         self.api_endpoint = "https://dev-unified-api.ucsf.edu/general/versaassistant/api/answer"
+        self.last_sources = []  # Track sources from last query
 
     def get_tool_definition(self) -> Dict[str, Any]:
         """Return OpenAI function definition for this tool"""
@@ -233,6 +234,52 @@ class NutritionTool(Tool):
             }
         }
 
+    def _extract_sources(self, answer: str) -> tuple[str, list]:
+        """
+        Extract source citations from the answer and format them for the UI.
+
+        Args:
+            answer: The answer text containing HTML source links
+
+        Returns:
+            Tuple of (cleaned_answer, sources_list)
+            - cleaned_answer: Answer text with source section removed
+            - sources_list: List of dicts with "text" and "url" keys
+        """
+        import re
+        from urllib.parse import urljoin
+
+        sources = []
+
+        # Pattern to match HTML links: <a href="..." target="_blank">link text</a>
+        link_pattern = r'<a\s+href="([^"]+)"[^>]*>([^<]+)</a>'
+
+        # Find all links in the answer
+        matches = re.findall(link_pattern, answer)
+
+        for href, link_text in matches:
+            # Convert relative URLs to absolute URLs
+            # Base URL for the UCSF API
+            base_url = "https://dev-unified-api.ucsf.edu"
+            full_url = urljoin(base_url, href)
+
+            sources.append({
+                "text": link_text.strip(),
+                "url": full_url
+            })
+
+        # Remove the "Cited Sources:" section and all links from the answer
+        # Split by "Cited Sources:" and take the first part
+        if "Cited Sources:" in answer or "cited sources:" in answer.lower():
+            # Use case-insensitive split
+            answer_parts = re.split(r'cited sources:?', answer, flags=re.IGNORECASE)
+            cleaned_answer = answer_parts[0].strip()
+        else:
+            # If no "Cited Sources" section, just remove all HTML links
+            cleaned_answer = re.sub(link_pattern, '', answer).strip()
+
+        return cleaned_answer, sources
+
     def execute(self, question: str) -> str:
         """
         Execute the nutrition query by calling the UCSF API.
@@ -246,6 +293,7 @@ class NutritionTool(Tool):
         try:
             # Get authentication token
             if not self.token_manager:
+                self.last_sources = []
                 return "Error: Authentication not configured for nutrition queries."
 
             token = self.token_manager.get_token()
@@ -299,25 +347,29 @@ class NutritionTool(Tool):
                 timeout=30  # 30 second timeout for API calls
             )
 
-            # Log the response details
-            print("\n" + "="*70)
-            print("NUTRITION API RESPONSE DETAILS")
-            print("="*70)
-            print(f"Status Code: {response.status_code}")
-            print(f"\nResponse Headers:")
-            for key, value in response.headers.items():
-                print(f"  {key}: {value}")
-
-            print(f"\nResponse Body:")
-            try:
-                response_json = response.json()
-                print(json.dumps(response_json, indent=2))
-            except:
-                print(f"  (Raw text): {response.text[:500]}")
-            print("="*70 + "\n")
-
-            # Check for HTTP errors
+            # Check for HTTP errors first (before logging)
             response.raise_for_status()
+
+            # Log the response details (only for successful responses)
+            try:
+                print("\n" + "="*70)
+                print("NUTRITION API RESPONSE DETAILS")
+                print("="*70)
+                print(f"Status Code: {response.status_code}")
+                print(f"\nResponse Headers:")
+                for key, value in response.headers.items():
+                    print(f"  {key}: {value}")
+
+                print(f"\nResponse Body:")
+                try:
+                    response_json = response.json()
+                    print(json.dumps(response_json, indent=2))
+                except:
+                    print(f"  (Raw text): {response.text[:500]}")
+                print("="*70 + "\n")
+            except Exception as log_error:
+                # If logging fails, continue with processing
+                print(f"[Warning: Response logging failed: {log_error}]")
 
             # Parse response
             response_data = response.json()
@@ -334,21 +386,33 @@ class NutritionTool(Tool):
                 )
 
                 if answer:
-                    return str(answer)
+                    # Extract sources and clean the answer
+                    cleaned_answer, sources = self._extract_sources(str(answer))
+
+                    # Store sources for retrieval by ToolManager
+                    self.last_sources = sources
+
+                    return cleaned_answer
                 else:
                     # If no recognized field, return the whole response as JSON
+                    self.last_sources = []
                     return json.dumps(response_data, indent=2)
             else:
                 # If response is not a dict, return as string
+                self.last_sources = []
                 return str(response_data)
 
         except requests.exceptions.Timeout:
+            self.last_sources = []
             return "Error: Nutrition API request timed out. Please try again."
         except requests.exceptions.RequestException as e:
+            self.last_sources = []
             return f"Error: Failed to connect to nutrition API - {str(e)}"
         except json.JSONDecodeError:
+            self.last_sources = []
             return "Error: Invalid response format from nutrition API."
         except Exception as e:
+            self.last_sources = []
             return f"Error: Unexpected error while querying nutrition API - {str(e)}"
 
 

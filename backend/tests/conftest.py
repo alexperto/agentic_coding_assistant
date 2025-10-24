@@ -267,6 +267,7 @@ def successful_nutrition_response():
     """Mock successful nutrition API response"""
     mock_response = Mock()
     mock_response.status_code = 200
+    mock_response.headers = {"Content-Type": "application/json"}
     mock_response.json.return_value = {
         "answer": "Bananas are a good source of potassium, containing about 422mg per medium banana. They also provide vitamin B6, vitamin C, and dietary fiber."
     }
@@ -278,6 +279,7 @@ def nutrition_response_alternative_format():
     """Mock nutrition API response with different field name"""
     mock_response = Mock()
     mock_response.status_code = 200
+    mock_response.headers = {"Content-Type": "application/json"}
     mock_response.json.return_value = {
         "response": "Apples are rich in antioxidants and dietary fiber."
     }
@@ -289,6 +291,7 @@ def nutrition_response_unknown_format():
     """Mock nutrition API response with unrecognized format"""
     mock_response = Mock()
     mock_response.status_code = 200
+    mock_response.headers = {"Content-Type": "application/json"}
     mock_response.json.return_value = {
         "data": {
             "text": "Some nutrition information"
@@ -303,6 +306,7 @@ def nutrition_401_error():
     import requests
     mock_response = Mock()
     mock_response.status_code = 401
+    mock_response.headers = {}
     mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("401 Unauthorized")
     return mock_response
 
@@ -319,5 +323,6 @@ def nutrition_invalid_json():
     """Mock nutrition API response with invalid JSON"""
     mock_response = Mock()
     mock_response.status_code = 200
+    mock_response.headers = {}
     mock_response.json.side_effect = json.JSONDecodeError("Invalid JSON", "", 0)
     return mock_response

@@ -289,3 +289,124 @@ class TestNutritionToolIntegrationWithToolManager:
 
         assert "Error" not in result
         assert len(result) > 0
+
+
+class TestNutritionToolSourceExtraction:
+    """Test source extraction and formatting for UI"""
+
+    def test_extract_sources_from_answer(self, mock_token_manager):
+        """Test that sources are extracted from HTML links in answer"""
+        tool = NutritionTool(mock_token_manager)
+
+        answer_with_sources = """Spinach is nutritious.
+
+Cited Sources:
+<a href="/get_document/example.pdf" target="_blank">Example Document.pdf</a>"""
+
+        cleaned, sources = tool._extract_sources(answer_with_sources)
+
+        # Verify source was extracted
+        assert len(sources) == 1
+        assert sources[0]["text"] == "Example Document.pdf"
+        assert "https://dev-unified-api.ucsf.edu/get_document/example.pdf" in sources[0]["url"]
+
+    def test_cleaned_answer_removes_sources_section(self, mock_token_manager):
+        """Test that cleaned answer doesn't contain 'Cited Sources' section"""
+        tool = NutritionTool(mock_token_manager)
+
+        answer_with_sources = """Spinach is nutritious.
+
+Cited Sources:
+<a href="/example.pdf" target="_blank">Example.pdf</a>"""
+
+        cleaned, sources = tool._extract_sources(answer_with_sources)
+
+        # Verify "Cited Sources" section is removed
+        assert "Cited Sources" not in cleaned
+        assert "Example.pdf" not in cleaned
+        assert "Spinach is nutritious." in cleaned
+
+    def test_multiple_sources_extracted(self, mock_token_manager):
+        """Test extracting multiple sources from answer"""
+        tool = NutritionTool(mock_token_manager)
+
+        answer = """Info here.
+
+Cited Sources:
+<a href="/doc1.pdf" target="_blank">Document 1</a>
+<a href="/doc2.pdf" target="_blank">Document 2</a>"""
+
+        cleaned, sources = tool._extract_sources(answer)
+
+        assert len(sources) == 2
+        assert sources[0]["text"] == "Document 1"
+        assert sources[1]["text"] == "Document 2"
+
+    @patch('requests.post')
+    def test_last_sources_tracked(self, mock_post, mock_token_manager):
+        """Test that sources are stored in last_sources after execute"""
+        # Mock response with sources
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json.return_value = {
+            "answer": """Protein sources include chicken.
+
+Cited Sources:
+<a href="/protein.pdf" target="_blank">Protein Guide.pdf</a>"""
+        }
+        mock_post.return_value = mock_response
+
+        tool = NutritionTool(mock_token_manager)
+        result = tool.execute(question="What are protein sources?")
+
+        # Verify sources were tracked
+        assert len(tool.last_sources) == 1
+        assert tool.last_sources[0]["text"] == "Protein Guide.pdf"
+        assert "url" in tool.last_sources[0]
+
+        # Verify result doesn't contain HTML or "Cited Sources"
+        assert "Cited Sources" not in result
+        assert "<a href" not in result
+
+    @patch('requests.post')
+    def test_sources_accessible_via_tool_manager(self, mock_post, mock_token_manager):
+        """Test that sources can be retrieved through ToolManager"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.json.return_value = {
+            "answer": """Info.
+
+Cited Sources:
+<a href="/test.pdf" target="_blank">Test.pdf</a>"""
+        }
+        mock_post.return_value = mock_response
+
+        manager = ToolManager()
+        tool = NutritionTool(mock_token_manager)
+        manager.register_tool(tool)
+
+        # Execute via manager
+        manager.execute_tool("ask_nutrition_expert", question="Test")
+
+        # Retrieve sources via manager
+        sources = manager.get_last_sources()
+
+        assert len(sources) == 1
+        assert sources[0]["text"] == "Test.pdf"
+
+    def test_sources_cleared_on_error(self, mock_token_manager):
+        """Test that sources are cleared when there's an error"""
+        tool = NutritionTool(mock_token_manager)
+
+        # Set some dummy sources
+        tool.last_sources = [{"text": "old", "url": "old"}]
+
+        # Execute with None token manager (should error)
+        tool.token_manager = None
+        result = tool.execute(question="Test")
+
+        # Verify sources were cleared
+        assert len(tool.last_sources) == 0
+        assert "Error" in result
